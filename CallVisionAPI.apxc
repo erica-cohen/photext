@@ -1,59 +1,22 @@
-File
-
-Edit
-
-Debug
-
-Test
-
-Workspace
-
-Help
-
-<
-
->
-
-Code Coverage: None
-46
-
-Go To
-1
 public class CallVisionAPI {
-2
+
     public static String callAPI(String reqJSON, String method, String endpointURL){
-3
+
         Http http = new Http();
-4
         HttpRequest req = new HttpRequest();
-5
         HttpResponse res = new HttpResponse();
-6
         req.setHeader('Content-Type', 'application/json');
-7
         req.setTimeout(120000);
-8
         //req.setEndpoint('https://vision.googleapis.com/v1/images:annotate?key=AIzaSyC4rLl5jf-j2lbXsvXfRcPPOWfXbusiA8g');
-9
         req.setEndpoint(endpointURL);
-10
         req.setMethod(method);
-11
         req.setBody(reqJSON);         
-12
         System.debug('Hello :::'+req);
-13
         res = http.send(req);
-14
         System.Debug(res.toString());
-15
         System.Debug('///////////');
-16
         System.Debug(res.getBody());
-17
         return res.getBody();
-18
     }
-19
 }
  
