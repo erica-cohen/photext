@@ -1,0 +1,12 @@
+<apex:page controller="ContentController">
+    <apex:messages />
+       <apex:form id="theForm">
+            <apex:pageBlock >
+              <apex:pageBlockSection >
+                  <apex:inputFile id="myFileInput" value="{!file}" required="true" accept="image/*;capture=camera"/>
+                  <apex:inputText value="{!inputValue}" id="theTextInput" required="true" label="File Name"/>
+                  <apex:commandButton value="Submit" action="{!upload}"/>
+              </apex:pageBlockSection>
+           </apex:pageBlock>
+    </apex:form>
+</apex:page>

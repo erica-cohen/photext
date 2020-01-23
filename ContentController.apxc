@@ -1,0 +1,153 @@
+public class ContentController {
+    /*
+     * Developer: Erica Cohen
+     * Date: 9/3/2019
+     * Updated: 9/18/2019
+     * Descr: Salesforce1 App that uploads cam/file as document, pulls text from image via Vision API then creates Contact from data.
+     * See CallVisionAPI and Photext_VF.vfp
+     * 
+     * Current constraints: Name acceptance criteria, multiple of same Contact param could overwrite, address doesn't account for extra text in field 
+	*/
+
+    public transient String inputValue { get; set; }
+    public transient blob file { get; set; }
+    
+   
+
+    public PageReference upload() {
+        //Below is for Lightning compatible File obj
+        //ContentVersion v = new ContentVersion();
+        //v.versionData = file;
+        //v.title = inputValue;
+        //v.pathOnClient ='/'+inputValue+'.png';
+        document v = new document();
+        v.body = file;
+        v.name = inputValue;
+        v.type = 'png';
+        v.IsPublic = true;
+        v.AuthorId = UserInfo.getUserId();
+        v.FolderId = UserInfo.getUserId();
+        
+        
+        String imageData = EncodingUtil.base64Encode(file);
+        String resJSON= callAPI(imageData); //res.getBody
+        insert v;
+
+        //Parsing response JSON
+		//template of API response JSON til what we need ='{"responses": [{"textAnnotations": [{"locale": "en","description": "all the text info here"},]}]}';
+        parse(resJSON);
+                
+        
+        return null;
+        
+       //return new PageReference('/' + v.id);
+    }
+    
+    public void parse(String resJSON){
+        //pulls description node from JSON file that contains full image text
+        Map<String, Object> m= (Map<String, Object>)JSON.deserializeUntyped(resJSON);
+        List<Object> r = (List<Object>)m.get('responses');
+        Map<String, Object> ta = (Map<String, Object>)r[0];
+		List<Object> ta_list = (List<Object>)ta.get('textAnnotations');
+        Map<String, Object> textInfo = (Map<String, Object>)ta_list[0];
+        String fullCardText = (String)textInfo.get('description');
+        list<String> textList = fullCardText.split('\n');
+        
+        Contact c = new Contact();
+        
+        //initializing data for sorting
+        list<String> descrList = new List<String>(); //empty list to fill with uncategorized text items
+        String emailRegex = '^[a-zA-Z0-9._|\\\\%#~`=?&/$^*!}{+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,4}$';
+        String streetAddressRegex = '\\d+\\w+\\s\\w+\\s\\w+';
+		String cityStZipRegex= '(.+?),?\\s(\\w+)\\s?([-\\d]+)';
+		String phoneRegex= '[0-9]{7,14}';
+		//String nameRegex= '(?:(\\w+-?\\w+)) (?:(\\w+))(?: (\\w+))?$';
+		//String nameRegex= '(?:((?:Dr.)|(?:Mr.)|(?:Mr?s.)|(?:Miss)|(?:2nd\\sLt.)|(?:Sen\\.?))\\s+)?((?:\\w+)|(?:\\w\\.))(?:\\s+((?:\\w\\.?)|(?:\\w\\w+)))?(?:\\s+((?:[OD][\'’]\\s?)?[-\\w]+))(?:,?\\s+( (?:[JS]r\\.?)|(?:Esq\\.?)|(?:((?:M)|(?:Ph)|(?:Ed)) \\.?\\s*D\\.?)|(?: R\\.?N\\.?)|(?:IV)|(?:VI)|(?:V)|(?: I+)))?\\s*$';
+        String nameRegex= '^\\s*(?:((?:Dr.)|(?:Mr.)|(?:Mr?s.)|(?:Miss)|(?:2nd\\sLt.)|(?:Sen\\.?))\\s+)?((?:\\w+)|(?:\\w\\.))(?:\\s+((?:\\w\\.?)|(?:\\w\\w+)))?(?:\\s+((?:[OD][\'’]\\s?)?[-\\w]+))(?:,?\\s+( (?:[JS]r\\.?)|(?:Esq\\.?)|(?:((?:M)|(?:Ph)|(?:Ed)) \\.?\\s*D\\.?)|(?: R\\.?N\\.?)|(?:IV)|(?:VI)|(?:V)|(?: I+)))?\\s*$';
+        Pattern emailPattern = Pattern.compile(emailRegex);
+        Pattern address1 = Pattern.compile(streetAddressRegex);
+		Pattern citystzip = Pattern.compile(cityStZipRegex);
+		Pattern phonePattern = Pattern.compile(phoneRegex);
+		Pattern namePattern = Pattern.compile(nameRegex);
+
+        
+        //iterate through and categorize data if matches corresponding Contact properties
+        for(Integer i=0;i<textList.Size();i++){
+			Matcher addMatcher1 = address1.matcher(textList[i]);
+            String cleanDigit = textList[i].replace('-','').replace('.','').replace('+','').replace('(','').replace(')','').replace(' ','');
+			String cleanEmail = textList[i].replace(' ','');
+            Matcher phoneMatcher = phonePattern.matcher(cleanDigit);
+			Matcher nameMatch = namePattern.matcher(textList[i]);
+            Matcher emailMatcher = emailPattern.matcher(cleanEmail);
+
+
+            
+            //check if email
+            if(textList[i].contains('@')){
+                if(emailMatcher.find()){
+                    String email=cleanEmail.SubString(emailMatcher.start(),emailMatcher.end());
+                    c.Email = email;
+                }
+                else{
+                    descrList.add(textList[i]);
+                }
+            }
+
+            //checks if address. If City/St/Zip on same line, will incl in Street field
+            else if(addMatcher1.find()){
+            	c.MailingStreet = textList[i];
+                
+                //checks next line to see if it contains city/st/zip info
+                if(i<textList.Size()){
+                    Matcher cszMatcher = citystzip.matcher(textList[i+1]);
+
+                    if(cszMatcher.find()){
+                        list<String> addrInfo = textList[i+1].split(' '); 
+                        if(addrInfo.Size()>=2){
+                                c.MailingCity = addrInfo[0].SubString(0,addrInfo[0].length()-1); //cuts off comma commonly after city
+                                c.MailingState = addrInfo[1];
+                                c.MailingPostalCode = addrInfo[2];
+                            	i++;
+                            	continue;
+                            }
+                        }
+                    }
+            }
+            //assumes phone number
+            else if(phoneMatcher.find()){ //min length of phone number is 7 for domestic codes
+                String phone=cleanDigit.SubString(phoneMatcher.start(),phoneMatcher.end());
+                if(c.Phone!=null){ //in case of multiple phone nums
+                    c.MobilePhone = phone;
+                }
+                else{
+                    c.Phone = phone;
+                }
+            }	
+            
+            //all fields that havent met condition deposited here, also includes name field
+            else{
+                //checks name. Cuts middle name if exists, only takes first/last word of possible name substrings. Problematic, can qualify any longer string that contains condition
+                if(nameMatch.find()){
+                    String firstlast = textList[i].SubString(nameMatch.start(),nameMatch.end());
+                	if(firstlast.split(' ').Size()>=2){
+                        c.FirstName = firstlast.split(' ')[0];
+                        c.LastName = firstlast.split(' ')[firstlast.split(' ').Size()-1];
+                	}
+                }
+                 //because of error potential, it will add to extras list regardless of first/last being fulfilled
+                 descrList.add(textList[i]);
+
+            }
+        }
+		c.Description = String.join(descrList,', '); //separates 'extra' text info by commas as Description
+		insert c;
+    }
+    
+    public String callAPI(String imageData){
+        //Creates JSON request per vision API, sends request with blob data and endpoint url
+        String reqJSON = '{ "requests": [ { "image": { "content": "'+imageData+'" }, "features": [ { "type": "TEXT_DETECTION" } ] } ] }';
+        String resJSON = CallVisionAPI.callAPI(reqJSON, 'POST', 'https://vision.googleapis.com/v1/images:annotate?key=AIzaSyC4rLl5jf-j2lbXsvXfRcPPOWfXbusiA8g');
+        //req.setEndpoint('https://vision.googleapis.com/v1/images:annotate?key=AIzaSyC4rLl5jf-j2lbXsvXfRcPPOWfXbusiA8g');
+        return resJSON; //response.getBody, String 
+    }
+}
